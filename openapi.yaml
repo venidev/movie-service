@@ -1,0 +1,219 @@
+openapi: 3.0.3
+info:
+  title: Movie Services API
+  version: 0.1.0
+  description: REST API over the movies and ratings SQLite databases.
+servers:
+  # When fetched from /openapi.json, this is replaced with the requesting host.
+  - url: http://localhost:3000
+    description: Local development
+tags:
+  - name: Movies
+    description: List all movies, search by title, and get details for one movie.
+  - name: Years
+    description: Movies released in a given year.
+  - name: Genres
+    description: Available genres and the movies in each.
+  - name: System
+    description: Service health.
+
+paths:
+  /api/v1/movies:
+    get:
+      tags: [Movies]
+      summary: List all movies, optionally searching by title
+      description: >
+        With `q`, returns movies whose title contains the text (case-insensitive).
+        Exact matches rank first, then titles starting with the text.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - name: q
+          in: query
+          description: Title search text, up to 100 characters.
+          schema: { type: string, maxLength: 100, example: star wars }
+      responses:
+        '200':
+          $ref: '#/components/responses/MovieList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/movies/{imdbId}:
+    get:
+      tags: [Movies]
+      summary: Get movie details
+      description: Average rating is pulled from the ratings database.
+      parameters:
+        - name: imdbId
+          in: path
+          required: true
+          description: IMDb id of the movie, e.g. tt0113101 (Four Rooms).
+          schema: { type: string, example: tt0113101 }
+      responses:
+        '200':
+          description: Movie details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/MovieDetails' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/years/{year}/movies:
+    get:
+      tags: [Years]
+      summary: List movies released in a year
+      description: Sorted by release date, chronologically unless `order=desc`.
+      parameters:
+        - name: year
+          in: path
+          required: true
+          description: Four-digit release year, e.g. 1995.
+          schema: { type: string, pattern: '^\d{4}$', example: '1995' }
+        - $ref: '#/components/parameters/Page'
+        - name: order
+          in: query
+          description: Sort by release date. `asc` is oldest first (default), `desc` is newest first.
+          schema: { type: string, enum: [asc, desc], default: asc }
+      responses:
+        '200':
+          $ref: '#/components/responses/MovieList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/genres:
+    get:
+      tags: [Genres]
+      summary: List all genres
+      responses:
+        '200':
+          description: Genre names, sorted alphabetically
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { type: string }
+                    example: [Action, Adventure, Animation]
+
+  /api/v1/genres/{genre}/movies:
+    get:
+      tags: [Genres]
+      summary: List movies in a genre
+      description: Genre match is case-insensitive.
+      parameters:
+        - name: genre
+          in: path
+          required: true
+          description: Genre name, case-insensitive. See `GET /api/v1/genres` for the full list.
+          schema: { type: string, example: Drama }
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          $ref: '#/components/responses/MovieList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /health:
+    get:
+      tags: [System]
+      summary: Health check
+      responses:
+        '200':
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+
+components:
+  parameters:
+    Page:
+      name: page
+      in: query
+      description: 1-based page number; 50 movies per page.
+      schema: { type: integer, minimum: 1, default: 1 }
+
+  schemas:
+    Budget:
+      type: string
+      nullable: true
+      description: Budget in dollars; null when unknown.
+      example: $4,000,000
+
+    MovieSummary:
+      type: object
+      properties:
+        imdbId: { type: string, example: tt0113101 }
+        title: { type: string, example: Four Rooms }
+        genres:
+          type: array
+          items: { type: string }
+          example: [Crime, Comedy]
+        releaseDate: { type: string, format: date, nullable: true, example: '1995-12-09' }
+        budget: { $ref: '#/components/schemas/Budget' }
+
+    MovieDetails:
+      type: object
+      properties:
+        imdbId: { type: string, example: tt0113101 }
+        title: { type: string, example: Four Rooms }
+        description: { type: string, nullable: true }
+        releaseDate: { type: string, format: date, nullable: true, example: '1995-12-09' }
+        budget: { $ref: '#/components/schemas/Budget' }
+        runtime: { type: number, nullable: true, example: 98 }
+        averageRating: { type: number, nullable: true, example: 3.27 }
+        ratingCount: { type: integer, example: 56 }
+        genres:
+          type: array
+          items: { type: string }
+        originalLanguage: { type: string, nullable: true }
+        productionCompanies:
+          type: array
+          items: { type: string }
+          example: [Miramax Films, A Band Apart]
+
+    Pagination:
+      type: object
+      properties:
+        page: { type: integer, example: 1 }
+        pageSize: { type: integer, example: 50 }
+        totalItems: { type: integer, example: 45430 }
+        totalPages: { type: integer, example: 909 }
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            status: { type: integer }
+            message: { type: string }
+
+  responses:
+    MovieList:
+      description: A page of movies
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              data:
+                type: array
+                items: { $ref: '#/components/schemas/MovieSummary' }
+              pagination: { $ref: '#/components/schemas/Pagination' }
+    BadRequest:
+      description: Invalid query or path parameter
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
